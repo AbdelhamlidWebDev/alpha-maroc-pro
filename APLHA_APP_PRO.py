@@ -179,6 +179,105 @@ if file:
         volume_col = find_col(df, ["volume", "vol"])
 
         st.success("✅ Fichier CSV lu et nettoyé avec succès !")
+        # --- Sélection/standardisation des colonnes utilisées
+cols = [date_col, price_col] + ([volume_col] if volume_col else [])
+df = df[cols].copy()
+df.rename(columns={date_col: "date", price_col: "close"}, inplace=True)
+if volume_col:
+    df.rename(columns={volume_col: "volume"}, inplace=True)
+
+# --- Types & tri
+df["date"] = pd.to_datetime(df["date"], errors="coerce")
+df["close"] = pd.to_numeric(df["close"], errors="coerce")
+if "volume" in df.columns:
+    df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
+df = df.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
+
+# --- Paramètres depuis l’UI
+rsi_period = int(st.session_state.get("rsi_period", 14))        # ou la variable que tu lis depuis le widget
+sma_fast   = int(st.session_state.get("sma_fast", 20))
+sma_mid    = int(st.session_state.get("sma_mid", 50))
+sma_slow   = int(st.session_state.get("sma_slow", 200))
+
+# --- Indicateurs
+df["RSI"]      = rsi(df["close"], rsi_period)
+df["SMA_fast"] = sma(df["close"], sma_fast)
+df["SMA_mid"]  = sma(df["close"], sma_mid)
+df["SMA_slow"] = sma(df["close"], sma_slow)
+macd_line, macd_signal, macd_hist = macd(df["close"])
+df["MACD"]        = macd_line
+df["MACD_signal"] = macd_signal
+df["MACD_hist"]   = macd_hist
+
+# =============== Graphique principal (cours + SMA) ===============
+st.subheader("📊 Graphique des prix & moyennes mobiles")
+import plotly.graph_objects as go
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=df["date"], y=df["close"], name="Close"))
+fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_fast"], name=f"SMA{sma_fast}"))
+fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_mid"],  name=f"SMA{sma_mid}"))
+fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_slow"], name=f"SMA{sma_slow}"))
+fig.update_layout(height=420, legend=dict(orientation="h", y=-0.2))
+st.plotly_chart(fig, use_container_width=True)
+
+# =============== RSI & MACD ===============
+c1, c2 = st.columns(2)
+with c1:
+    st.subheader("RSI")
+    frsi = go.Figure()
+    frsi.add_trace(go.Scatter(x=df["date"], y=df["RSI"], name="RSI"))
+    frsi.add_hline(y=70, line=dict(color="red", dash="dot"))
+    frsi.add_hline(y=30, line=dict(color="green", dash="dot"))
+    frsi.update_layout(height=250)
+    st.plotly_chart(frsi, use_container_width=True)
+with c2:
+    st.subheader("MACD")
+    fmacd = go.Figure()
+    fmacd.add_trace(go.Scatter(x=df["date"], y=df["MACD"], name="MACD"))
+    fmacd.add_trace(go.Scatter(x=df["date"], y=df["MACD_signal"], name="Signal"))
+    fmacd.add_trace(go.Bar(x=df["date"], y=df["MACD_hist"], name="Hist"))
+    fmacd.update_layout(height=250, barmode="relative")
+    st.plotly_chart(fmacd, use_container_width=True)
+
+# =============== Signaux & interprétation ===============
+last = df.iloc[-1]
+price_last    = float(last["close"])
+rsi_last      = float(last["RSI"])
+sma_mid_last  = float(last["SMA_mid"])
+sma_slow_last = float(last["SMA_slow"])
+macd_pos      = 1 if last["MACD_hist"] > 0 else 0
+rsi_signal    = 1 if rsi_last <= 30 else (0 if rsi_last >= 70 else 0.5)
+sma_cross     = 1 if (price_last > sma_mid_last and sma_mid_last > sma_slow_last) else 0
+
+# Pondérations (modifiable)
+w_rsi, w_sma, w_macd = 30, 40, 30
+tech_score = round((rsi_signal*w_rsi + sma_cross*w_sma + macd_pos*w_macd)/(w_rsi+w_sma+w_macd)*100, 0)
+
+df_sig = pd.DataFrame([{
+    "Last Price": price_last,
+    "RSI": rsi_last,
+    f"SMA{sma_mid}": sma_mid_last,
+    f"SMA{sma_slow}": sma_slow_last,
+    "MACD>0": macd_pos,
+    "RSI_signal(1/0/0.5)": rsi_signal,
+    "SMA_cross(1/0)": sma_cross,
+    "Tech Score (0-100)": tech_score
+}])
+
+st.subheader("🧪 Signaux techniques (instantané)")
+st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
+
+# Interprétations rapides
+bullet = []
+bullet.append(f"• **RSI {rsi_last:.1f}** → survente <30, surachat >70.")
+bullet.append("• **MACD** > 0 → biais haussier court terme." if macd_pos else "• **MACD** < 0 → biais baissier court terme.")
+bullet.append("• **SMA_mid au-dessus de SMA_slow** et prix au-dessus de SMA_mid → tendance haussière" if sma_cross else "• Tendance non confirmée par les MM.")
+st.markdown("\n".join(bullet))
+
+# Partage pour l’onglet Recommandation
+st.session_state["df_sig"] = df_sig
+st.session_state["hist"]  = df
+
 
     except Exception as e:
         st.error(f"Erreur lors du traitement du fichier : {e}")
@@ -288,6 +387,7 @@ if file:
         st.subheader("🧪 Signaux techniques (instantané)")
         st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
         st.info("✅ Analyse technique prête. Passe à l’onglet **Recommandation & Export**.")
+
 
 
 

@@ -158,21 +158,28 @@ with tabs[1]:
     # ---------- Lecture & nettoyage du CSV ----------
     df_sig = None
     if file:
-        try:
-            # sep=None + engine='python' -> auto-détection ; utile pour CSV fr
-            df = pd.read_csv(file, sep=None, engine="python")
-        except Exception as e:
-            st.error(f"Impossible de lire ce fichier CSV : {e}")
-            st.stop()
-# --- Nettoyage des noms de colonnes ---
-def nettoyer_nom_colonne(colonne):
-    return (str(colonne)
-            .replace("\ufeff", "")   # Supprime les caractères cachés (BOM)
-            .strip()                 # Enlève les espaces au début et à la fin
-            .strip('"')              # Enlève les guillemets doubles
-            .strip("'"))             # Enlève les guillemets simples
+    try:
+        # sep=None + engine='python' → auto-détection ; utile pour CSV français
+        df = pd.read_csv(file, sep=None, engine="python")
 
-df.columns = [nettoyer_nom_colonne(c) for c in df.columns]
+        # --- Nettoyage des noms de colonnes ---
+        def nettoyer_nom_colonne(colonne):
+            return (str(colonne)
+                    .replace("\ufeff", "")   # Supprime les caractères cachés (BOM)
+                    .strip()                 # Enlève les espaces au début et à la fin
+                    .strip('"')              # Enlève les guillemets doubles
+                    .strip("'"))             # Enlève les guillemets simples
+
+        df.columns = [nettoyer_nom_colonne(c) for c in df.columns]
+
+        # --- Détection des colonnes ---
+        date_col = find_col(df, ["date"])
+        price_col = find_col(df, ["close", "prix", "price", "dernier", "last", "cloture", "clôture"])
+        volume_col = find_col(df, ["volume", "vol"])
+
+    except Exception as e:
+        st.error(f"Erreur lors du traitement du fichier : {e}"))
+            st.stop()
         # Détection souple des colonnes clés
         date_col = find_col(df, ["date"])
         price_col = find_col(df, ["close", "prix", "price", "dernier", "last"])
@@ -279,4 +286,5 @@ df.columns = [nettoyer_nom_colonne(c) for c in df.columns]
         st.subheader("🧪 Signaux techniques (instantané)")
         st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
         st.info("✅ Analyse technique prête. Passe à l’onglet **Recommandation & Export**.")
+
 

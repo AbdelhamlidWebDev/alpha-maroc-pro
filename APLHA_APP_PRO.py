@@ -285,3 +285,133 @@ for col in df.columns:
             .str.replace(' ', '')    # supprime les espaces
         )
         df[col] = pd.to_numeric(df[col], errors='coerce')  # convertit en nombre
+# ==========================================================
+# 📈 Onglet TECHNIQUE
+# ==========================================================
+with tabs[1]:
+    st.markdown("Charge un **CSV Investing.com** (Données historiques). Colonnes attendues : **Date**, **Close/Price**, **Volume**.")
+    file = st.file_uploader("Uploader le CSV des prix (Investing)", type=["csv"])
+
+    # Paramètres techniques
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        rsi_period = st.number_input("Période RSI", value=14, min_value=2, step=1)
+    with col2:
+        sma_fast = st.number_input("SMA courte", value=20, min_value=2, step=1)
+    with col3:
+        sma_mid = st.number_input("SMA moyenne", value=50, min_value=2, step=1)
+    with col4:
+        sma_slow = st.number_input("SMA longue", value=200, min_value=2, step=1)
+
+    df_sig = None
+
+    # ⚠️ TOUT le traitement doit rester **dans** ce bloc
+    if file:
+        # 1) Lecture CSV
+        df = pd.read_csv(file)
+        df.rename(columns=lambda c: str(c).strip(), inplace=True)
+
+        # 2) Détection des colonnes
+        date_col = next((c for c in df.columns if c.lower().startswith("date")), None)
+        price_col = next(
+            (c for c in df.columns
+             if c.lower() in ["close", "close/price", "price", "dernier", "last", "prix"]),
+            None
+        )
+        volume_col = next((c for c in df.columns if "vol" in c.lower()), None)
+
+        if not date_col or not price_col:
+            st.error("Colonnes non reconnues. Assure-toi d’avoir au moins **Date** et **Close/Price**.")
+            st.stop()
+
+        # 3) Nettoyage NUMÉRIQUE ciblé (prix + volume)
+        for c in [price_col, volume_col]:
+            if c and c in df.columns:
+                if df[c].dtype == "object":
+                    df[c] = (
+                        df[c].astype(str)
+                             .str.replace("\xa0", "", regex=False)  # NBSP
+                             .str.replace(" ", "", regex=False)     # espaces
+                             .str.replace(",", ".", regex=False)     # virgule -> point
+                    )
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        # 4) Normalisation des colonnes et tri
+        keep = [date_col, price_col] + ([volume_col] if volume_col else [])
+        df = df[keep].copy()
+        rename_map = {date_col: "date", price_col: "close"}
+        if volume_col:
+            rename_map[volume_col] = "volume"
+        df.rename(columns=rename_map, inplace=True)
+
+        # dates (Investing est souvent day-first)
+        df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")
+        df = df.dropna(subset=["date", "close"]).sort_values("date")
+
+        # 5) Calcul indicateurs
+        df["RSI"] = rsi(df["close"], rsi_period)
+        df["SMA_fast"] = sma(df["close"], sma_fast)
+        df["SMA_mid"]  = sma(df["close"], sma_mid)
+        df["SMA_slow"] = sma(df["close"], sma_slow)
+        macd_line, macd_signal, macd_hist = macd(df["close"])
+        df["MACD"] = macd_line
+        df["MACD_signal"] = macd_signal
+        df["MACD_hist"] = macd_hist
+
+        # 6) Graphique prix + moyennes
+        st.subheader("📊 Graphique")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df["date"], y=df["close"], name="Close"))
+        fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_fast"], name=f"SMA{sma_fast}"))
+        fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_mid"],  name=f"SMA{sma_mid}"))
+        fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_slow"], name=f"SMA{sma_slow}"))
+        fig.update_layout(height=420, legend=dict(orientation="h", y=-0.2))
+        st.plotly_chart(fig, use_container_width=True)
+
+        # 7) RSI + MACD
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("RSI")
+            fig_rsi = go.Figure()
+            fig_rsi.add_trace(go.Scatter(x=df["date"], y=df["RSI"], name="RSI"))
+            fig_rsi.add_hline(y=70, line=dict(color="red", dash="dot"))
+            fig_rsi.add_hline(y=30, line=dict(color="green", dash="dot"))
+            fig_rsi.update_layout(height=250)
+            st.plotly_chart(fig_rsi, use_container_width=True)
+        with c2:
+            st.subheader("MACD")
+            fig_macd = go.Figure()
+            fig_macd.add_trace(go.Scatter(x=df["date"], y=df["MACD"], name="MACD"))
+            fig_macd.add_trace(go.Scatter(x=df["date"], y=df["MACD_signal"], name="Signal"))
+            fig_macd.add_trace(go.Bar(x=df["date"], y=df["MACD_hist"], name="Hist"))
+            fig_macd.update_layout(height=250, barmode="relative")
+            st.plotly_chart(fig_macd, use_container_width=True)
+
+        # 8) Score / signaux
+        last = df.iloc[-1]
+        price_last = float(last["close"])
+        rsi_last = float(last["RSI"])
+        sma_mid_last = float(last["SMA_mid"])
+        sma_slow_last = float(last["SMA_slow"])
+        macd_pos = 1 if last["MACD_hist"] > 0 else 0
+        rsi_signal = 1 if rsi_last <= 30 else (0 if rsi_last >= 70 else 0.5)
+        sma_cross = 1 if (price_last > sma_mid_last and sma_mid_last > sma_slow_last) else 0
+
+        w_rsi, w_sma, w_macd = 30, 40, 30
+        score_tech = round((rsi_signal*w_rsi + sma_cross*w_sma + macd_pos*w_macd) /
+                           (w_rsi+w_sma+w_macd) * 100, 0)
+
+        df_sig = pd.DataFrame([{
+            "Last Price": price_last,
+            "RSI": rsi_last,
+            f"SMA{sma_mid}": sma_mid_last,
+            f"SMA{sma_slow}": sma_slow_last,
+            "MACD>0": macd_pos,
+            "RSI_signal(1/0/0.5)": rsi_signal,
+            "SMA_cross(1/0)": sma_cross,
+            "Tech Score (0-100)": score_tech
+        }])
+
+        st.subheader("🧪 Signaux techniques (instantané)")
+        st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
+        st.info("✅ Analyse technique prête. Passe à l’onglet **Recommandation & Export**.")

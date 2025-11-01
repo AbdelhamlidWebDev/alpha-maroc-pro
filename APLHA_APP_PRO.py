@@ -164,7 +164,15 @@ with tabs[1]:
         except Exception as e:
             st.error(f"Impossible de lire ce fichier CSV : {e}")
             st.stop()
+# --- Nettoyage des noms de colonnes ---
+def nettoyer_nom_colonne(colonne):
+    return (str(colonne)
+            .replace("\ufeff", "")   # Supprime les caractères cachés (BOM)
+            .strip()                 # Enlève les espaces au début et à la fin
+            .strip('"')              # Enlève les guillemets doubles
+            .strip("'"))             # Enlève les guillemets simples
 
+df.columns = [nettoyer_nom_colonne(c) for c in df.columns]
         # Détection souple des colonnes clés
         date_col = find_col(df, ["date"])
         price_col = find_col(df, ["close", "prix", "price", "dernier", "last"])
@@ -271,3 +279,4 @@ with tabs[1]:
         st.subheader("🧪 Signaux techniques (instantané)")
         st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
         st.info("✅ Analyse technique prête. Passe à l’onglet **Recommandation & Export**.")
+

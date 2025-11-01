@@ -178,7 +178,7 @@ with tabs[1]:
         volume_col = find_col(df, ["volume", "vol"])
 
     except Exception as e:
-        st.error(f"Erreur lors du traitement du fichier : {e}"))
+        st.error(f"Erreur lors du traitement du fichier : {e}")
             st.stop()
         # Détection souple des colonnes clés
         date_col = find_col(df, ["date"])
@@ -286,5 +286,6 @@ with tabs[1]:
         st.subheader("🧪 Signaux techniques (instantané)")
         st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
         st.info("✅ Analyse technique prête. Passe à l’onglet **Recommandation & Export**.")
+
 
 

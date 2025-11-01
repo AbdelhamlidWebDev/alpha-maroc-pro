@@ -310,6 +310,21 @@ with tabs[1]:
         # 1) Lecture CSV
         df = pd.read_csv(file)
         df.rename(columns=lambda c: str(c).strip(), inplace=True)
+        def _to_num(s):
+    s = (s.astype(str)
+          .str.replace("\u00a0", "", regex=False)   # NBSP
+          .str.replace("\u202f", "", regex=False)   # espace fine insécable (FR)
+          .str.replace(" ", "", regex=False)        # espaces
+          .str.replace(",", ".", regex=False))       # virgule -> point
+    return pd.to_numeric(s, errors="coerce")
+
+if price_col in df.columns:
+    df[price_col] = _to_num(df[price_col])
+
+if volume_col and volume_col in df.columns:
+    df[volume_col] = _to_num(df[volume_col])
+     # 👉 Ensuite : calcul RSI, SMA, MACD
+    df["RSI"] = rsi(df["close"], rsi_period)
 
         # 2) Détection des colonnes
         date_col = next((c for c in df.columns if c.lower().startswith("date")), None)
@@ -411,7 +426,26 @@ with tabs[1]:
             "SMA_cross(1/0)": sma_cross,
             "Tech Score (0-100)": score_tech
         }])
+def rsi(series, period=14):
+    # Toujours convertir en numérique et propager les valeurs valides
+    series = pd.to_numeric(series, errors="coerce")
+    series = series.ffill()
 
+    # Trop peu de points ? On renvoie une série vide (évite le crash)
+    if series.notna().sum() < period + 1:
+        return pd.Series(index=series.index, dtype=float)
+
+    delta = series.diff()
+    up = np.where(delta > 0, delta, 0.0)
+    down = np.where(delta < 0, -delta, 0.0)
+
+    roll_up = pd.Series(up, index=series.index).rolling(period, min_periods=period).mean()
+    roll_down = pd.Series(down, index=series.index).rolling(period, min_periods=period).mean()
+
+    rs = roll_up / roll_down.replace(0, np.nan)
+    rsi_v = 100 - (100 / (1 + rs))
+    return rsi_v.bfill()
         st.subheader("🧪 Signaux techniques (instantané)")
         st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
         st.info("✅ Analyse technique prête. Passe à l’onglet **Recommandation & Export**.")
+

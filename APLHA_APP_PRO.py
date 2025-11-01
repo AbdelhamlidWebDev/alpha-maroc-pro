@@ -158,21 +158,21 @@ with tabs[1]:
     # ---------- Lecture & nettoyage du CSV ----------
     df_sig = None
     if file:
-    try:
-        # sep=None + engine='python' → auto-détection ; utile pour CSV français
+      try:
+        # Lecture du CSV (auto-détection du séparateur)
         df = pd.read_csv(file, sep=None, engine="python")
 
         # --- Nettoyage des noms de colonnes ---
         def nettoyer_nom_colonne(colonne):
             return (str(colonne)
                     .replace("\ufeff", "")   # Supprime les caractères cachés (BOM)
-                    .strip()                 # Enlève les espaces au début et à la fin
-                    .strip('"')              # Enlève les guillemets doubles
-                    .strip("'"))             # Enlève les guillemets simples
+                    .strip()                 # Enlève les espaces
+                    .strip('"')              # Supprime les guillemets doubles
+                    .strip("'"))             # Supprime les guillemets simples
 
         df.columns = [nettoyer_nom_colonne(c) for c in df.columns]
 
-        # --- Détection des colonnes ---
+        # --- Détection automatique des colonnes ---
         date_col = find_col(df, ["date"])
         price_col = find_col(df, ["close", "prix", "price", "dernier", "last", "cloture", "clôture"])
         volume_col = find_col(df, ["volume", "vol"])
@@ -286,6 +286,7 @@ with tabs[1]:
         st.subheader("🧪 Signaux techniques (instantané)")
         st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
         st.info("✅ Analyse technique prête. Passe à l’onglet **Recommandation & Export**.")
+
 
 
 

@@ -272,4 +272,16 @@ with tabs[2]:
             file_name="AlphaMaroc_Report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
         st.success("Rapport prêt ✅")
+        df = pd.read_csv(file)
+        # Nettoyage des colonnes numériques
+for col in df.columns:
+    if df[col].dtype == 'object':  # si c'est du texte
+        df[col] = (
+            df[col]
+            .astype(str)
+            .str.replace(',', '.')   # remplace la virgule par un point
+            .str.replace(' ', '')    # supprime les espaces
+        )
+        df[col] = pd.to_numeric(df[col], errors='coerce')  # convertit en nombre

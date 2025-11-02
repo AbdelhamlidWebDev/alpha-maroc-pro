@@ -155,180 +155,144 @@ with tabs[1]:
         out = 100 - (100 / (1 + rs))
         return out.bfill()
 
-    # ---------- Lecture & nettoyage du CSV ----------
-    df_sig = None
+# =======================
+# 🔧 Lecture & nettoyage
+# =======================
+file = st.file_uploader("Uploader le CSV des prix (Investing)", type=["csv"])
+
+def _norm_cols(cols):
+    out = []
+    for c in cols:
+        s = str(c).lower()
+        for ch in ["\u00a0", "\ufeff", "’", "'", " "]:
+            s = s.replace(ch, "")
+        s = s.replace("clôture", "cloture").replace("dernier", "close").replace("prix", "close")
+        s = s.replace("date", "date").replace("vol.", "volume").replace("vol", "volume")
+        out.append(s)
+    return out
+
+def _pick(df, candidates):
+    for c in candidates:
+        if c in df.columns: 
+            return c
+    return None
 
 if file:
     try:
-        # Lecture du CSV
-        df = pd.read_csv(file, sep=None, engine="python")
+        # 1) Lecture tolérante (séparateur auto) + encodages variés
+        raw = pd.read_csv(file, sep=None, engine="python", encoding="utf-8", skip_blank_lines=True)
+        # (si besoin) retenter avec latin1 :
+        if raw.shape[1] == 1:
+            file.seek(0)
+            raw = pd.read_csv(file, sep=None, engine="python", encoding="latin1", skip_blank_lines=True)
 
-        # --- Nettoyage des noms de colonnes ---
-        def nettoyer_nom_colonne(colonne):
-            return (str(colonne)
-                    .replace("\ufeff", "")   # Supprime les caractères cachés (BOM)
-                    .strip()                 # Supprime les espaces
-                    .strip('"')              # Supprime les guillemets doubles
-                    .strip("'"))             # Supprime les guillemets simples
+        rows_in = len(raw)
+        raw.columns = _norm_cols(raw.columns)
 
-        df.columns = [nettoyer_nom_colonne(c) for c in df.columns]
-
-        # --- Détection automatique des colonnes ---
-        date_col = find_col(df, ["date"])
-        price_col = find_col(df, ["close", "prix", "price", "dernier", "last", "cloture", "clôture"])
-        volume_col = find_col(df, ["volume", "vol"])
-
-        st.success("✅ Fichier CSV lu et nettoyé avec succès !")
-        # --- Sélection/standardisation des colonnes utilisées
-        cols = [date_col, price_col] + ([volume_col] if volume_col else [])
-        df = df[cols].copy()
-        df.rename(columns={date_col: "date", price_col: "close"}, inplace=True)
-        if volume_col:
-            df.rename(columns={volume_col: "volume"}, inplace=True)
-
-        # --- Types & tri
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        df["close"] = pd.to_numeric(df["close"], errors="coerce")
-        if "volume" in df.columns:
-            df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
-        df = df.dropna(subset=["date", "close"]).sort_values("date").reset_index(drop=True)
-
-        # --- Paramètres depuis l’UI
-        rsi_period = int(st.session_state.get("rsi_period", 14))        # ou la variable que tu lis depuis le widget
-        sma_fast   = int(st.session_state.get("sma_fast", 20))
-        sma_mid    = int(st.session_state.get("sma_mid", 50))
-        sma_slow   = int(st.session_state.get("sma_slow", 200))
-
-        # --- Indicateurs
-        df["RSI"]      = rsi(df["close"], rsi_period)
-        df["SMA_fast"] = sma(df["close"], sma_fast)
-        df["SMA_mid"]  = sma(df["close"], sma_mid)
-        df["SMA_slow"] = sma(df["close"], sma_slow)
-        macd_line, macd_signal, macd_hist = macd(df["close"])
-        df["MACD"]        = macd_line
-        df["MACD_signal"] = macd_signal
-        df["MACD_hist"]   = macd_hist
-        
-        # =============== Graphique principal (cours + SMA) ===============
-        st.subheader("📊 Graphique des prix & moyennes mobiles")
-        import plotly.graph_objects as go
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df["date"], y=df["close"], name="Close"))
-        fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_fast"], name=f"SMA{sma_fast}"))
-        fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_mid"],  name=f"SMA{sma_mid}"))
-        fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_slow"], name=f"SMA{sma_slow}"))
-        fig.update_layout(height=420, legend=dict(orientation="h", y=-0.2))
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # =============== RSI & MACD ===============
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("RSI")
-            frsi = go.Figure()
-            frsi.add_trace(go.Scatter(x=df["date"], y=df["RSI"], name="RSI"))
-            frsi.add_hline(y=70, line=dict(color="red", dash="dot"))
-            frsi.add_hline(y=30, line=dict(color="green", dash="dot"))
-            frsi.update_layout(height=250)
-            st.plotly_chart(frsi, use_container_width=True)
-        with c2:
-            st.subheader("MACD")
-            fmacd = go.Figure()
-            fmacd.add_trace(go.Scatter(x=df["date"], y=df["MACD"], name="MACD"))
-            fmacd.add_trace(go.Scatter(x=df["date"], y=df["MACD_signal"], name="Signal"))
-            fmacd.add_trace(go.Bar(x=df["date"], y=df["MACD_hist"], name="Hist"))
-            fmacd.update_layout(height=250, barmode="relative")
-            st.plotly_chart(fmacd, use_container_width=True)
-        
-        # =============== Signaux & interprétation ===============
-        last = df.iloc[-1]
-        price_last    = float(last["close"])
-        rsi_last      = float(last["RSI"])
-        sma_mid_last  = float(last["SMA_mid"])
-        sma_slow_last = float(last["SMA_slow"])
-        macd_pos      = 1 if last["MACD_hist"] > 0 else 0
-        rsi_signal    = 1 if rsi_last <= 30 else (0 if rsi_last >= 70 else 0.5)
-        sma_cross     = 1 if (price_last > sma_mid_last and sma_mid_last > sma_slow_last) else 0
-        
-        # Pondérations (modifiable)
-        w_rsi, w_sma, w_macd = 30, 40, 30
-        tech_score = round((rsi_signal*w_rsi + sma_cross*w_sma + macd_pos*w_macd)/(w_rsi+w_sma+w_macd)*100, 0)
-        
-        df_sig = pd.DataFrame([{
-            "Last Price": price_last,
-            "RSI": rsi_last,
-            f"SMA{sma_mid}": sma_mid_last,
-            f"SMA{sma_slow}": sma_slow_last,
-            "MACD>0": macd_pos,
-            "RSI_signal(1/0/0.5)": rsi_signal,
-            "SMA_cross(1/0)": sma_cross,
-            "Tech Score (0-100)": tech_score
-        }])
-        
-        st.subheader("🧪 Signaux techniques (instantané)")
-        st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
-        
-        # Interprétations rapides
-        bullet = []
-        bullet.append(f"• **RSI {rsi_last:.1f}** → survente <30, surachat >70.")
-        bullet.append("• **MACD** > 0 → biais haussier court terme." if macd_pos else "• **MACD** < 0 → biais baissier court terme.")
-        bullet.append("• **SMA_mid au-dessus de SMA_slow** et prix au-dessus de SMA_mid → tendance haussière" if sma_cross else "• Tendance non confirmée par les MM.")
-        st.markdown("\n".join(bullet))
-        
-        # Partage pour l’onglet Recommandation
-        st.session_state["df_sig"] = df_sig
-        st.session_state["hist"]  = df
-    except Exception as e:
-        st.error(f"Erreur lors du traitement du fichier : {e}")
-        # Détection souple des colonnes clés
-        date_col = find_col(df, ["date"])
-        price_col = find_col(df, ["close", "prix", "price", "dernier", "last"])
-        volume_col = find_col(df, ["volume", "vol"])
+        # 2) Détection colonnes
+        date_col  = _pick(raw, ["date"])
+        price_col = _pick(raw, ["close","cloture","dernier","last","close/price","closeprice"])
+        vol_col   = _pick(raw, ["volume","vol"])
 
         if not date_col or not price_col:
-            st.error(
-                "Colonnes non reconnues. Assure-toi d’avoir au moins **Date** "
-                "et **Close/Price/Dernier** dans le CSV."
-            )
-            st.dataframe(df.head(20))
+            st.error("Colonnes non reconnues. Assure-toi d’avoir **Date** et **Close/Dernier**.")
             st.stop()
 
-        # Normalisation colonnes
-        df = df.rename(columns={date_col: "date", price_col: "close"})
-        if volume_col:
-            df = df.rename(columns={volume_col: "volume"})
+        df = raw[[date_col, price_col] + ([vol_col] if vol_col else [])].copy()
+        df.rename(columns={date_col:"date", price_col:"close", vol_col:"volume" if vol_col else None}, inplace=True)
 
-        # Parse des dates robuste (format fr ok)
-        df["date"] = pd.to_datetime(df["date"], errors="coerce", dayfirst=True, infer_datetime_format=True)
-        df = df.dropna(subset=["date"])
+        # 3) Dates (Investing fr : jour/mois/année)
+        df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")
 
-        # Nettoyage des nombres (prix / volume)
-        df["close"] = normalize_numeric(df["close"])
+        # 4) Prix : normaliser (virgule décimale, espaces, tirets)
+        def parse_price(x):
+            if pd.isna(x): return np.nan
+            s = str(x)
+            s = (s.replace("\u00a0","").replace(" ", "")
+                   .replace("−","-").replace("–","-")
+                   .replace(",", "."))   # virgule -> point
+            # supprimer tout sauf chiffres, point, signe
+            s = re.sub(r"[^0-9\.\-]", "", s)
+            try:
+                return float(s)
+            except:
+                return np.nan
+
+        import re
+        df["close"] = df["close"].map(parse_price)
+
+        # 5) Volume (K/M) facultatif
         if "volume" in df.columns:
-            df["volume"] = normalize_numeric(df["volume"])
+            def parse_vol(v):
+                if pd.isna(v): return np.nan
+                s = str(v).replace("\u00a0","").replace(" ", "").lower()
+                mult = 1
+                if s.endswith("k"): mult, s = 1_000, s[:-1]
+                elif s.endswith("m"): mult, s = 1_000_000, s[:-1]
+                s = s.replace(",", ".")
+                s = re.sub(r"[^0-9\.\-]", "", s)
+                try:
+                    return float(s) * mult
+                except:
+                    return np.nan
+            df["volume"] = df["volume"].map(parse_vol)
 
-        # Trier et garder lignes valides pour le prix
-        df = df.sort_values("date").dropna(subset=["close"])
+        # 6) Trier, retirer NaN de base
+        df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+        df = df.dropna(subset=["close"]).reset_index(drop=True)
 
-        if len(df) < max(50, rsi_period + 5):
-            st.warning("Pas assez d’historique pour calculer tous les indicateurs. Ajoute plus de données.")
-            st.dataframe(df.tail(10))
+        rows_out = len(df)
+        st.info(f"📄 Lignes CSV : **{rows_in}** → après nettoyage : **{rows_out}**")
+
+        # 7) Garde-fou d’historique (RSI/SMA/MACD)
+        rsi_period = st.number_input("Période RSI", value=14, min_value=2, step=1)
+        sma_fast   = st.number_input("SMA courte", value=20, min_value=2, step=1)
+        sma_mid    = st.number_input("SMA moyenne", value=50, min_value=2, step=1)
+        sma_slow   = st.number_input("SMA longue", value=200, min_value=2, step=1)
+
+        # Nombre minimal pour que tout ait un sens
+        need = max(int(sma_slow), int(rsi_period) + 5, 35)
+        if len(df) < need:
+            st.warning(f"⚠️ Historique insuffisant pour SMA {sma_slow}/RSI {rsi_period}. "
+                       f"Il reste **{len(df)}** lignes après nettoyage, besoin ≈ **{need}**. "
+                       "→ Télécharge plus de données ou diminue SMA longue.")
             st.stop()
 
-        # ---------- Indicateurs ----------
-        df["RSI"] = safe_rsi(df["close"], rsi_period)
-        df["SMA_fast"] = df["close"].rolling(sma_fast, min_periods=1).mean()
-        df["SMA_mid"]  = df["close"].rolling(sma_mid,  min_periods=1).mean()
-        df["SMA_slow"] = df["close"].rolling(sma_slow, min_periods=1).mean()
+        # =========================
+        # 🧮 Indicateurs techniques
+        # =========================
+        def sma(series, window):
+            return series.rolling(window, min_periods=window).mean()
 
-        macd_line = df["close"].ewm(span=12, adjust=False).mean() - df["close"].ewm(span=26, adjust=False).mean()
-        macd_signal = macd_line.ewm(span=9, adjust=False).mean()
-        macd_hist = macd_line - macd_signal
+        def ema(series, span):
+            return series.ewm(span=span, adjust=False, min_periods=span).mean()
 
-        df["MACD"] = macd_line
-        df["MACD_signal"] = macd_signal
-        df["MACD_hist"] = macd_hist
+        def rsi_calc(series, period=14):
+            delta = series.diff()
+            up   = delta.clip(lower=0)
+            down = -delta.clip(upper=0)
+            roll_up   = up.rolling(period, min_periods=period).mean()
+            roll_down = down.rolling(period, min_periods=period).mean()
+            rs = roll_up / roll_down.replace(0, np.nan)
+            r = 100 - (100 / (1 + rs))
+            return r
 
-        # ---------- Graphique prix + SMAs ----------
+        def macd_calc(series, fast=12, slow=26, signal=9):
+            macd_line   = ema(series, fast) - ema(series, slow)
+            signal_line = ema(macd_line, signal)
+            hist = macd_line - signal_line
+            return macd_line, signal_line, hist
+
+        df["RSI"]      = rsi_calc(df["close"], period=int(rsi_period))
+        df["SMA_fast"] = sma(df["close"], int(sma_fast))
+        df["SMA_mid"]  = sma(df["close"], int(sma_mid))
+        df["SMA_slow"] = sma(df["close"], int(sma_slow))
+        macd_line, macd_sig, macd_hist = macd_calc(df["close"])
+        df["MACD"], df["MACD_signal"], df["MACD_hist"] = macd_line, macd_sig, macd_hist
+
+        # =========================
+        # 📊 Graphiques
+        # =========================
         st.subheader("📊 Graphique")
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df["date"], y=df["close"], name="Close"))
@@ -338,7 +302,6 @@ if file:
         fig.update_layout(height=420, legend=dict(orientation="h", y=-0.2))
         st.plotly_chart(fig, use_container_width=True)
 
-        # ---------- RSI + MACD ----------
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("RSI")
@@ -348,7 +311,6 @@ if file:
             fig_rsi.add_hline(y=30, line=dict(color="green", dash="dot"))
             fig_rsi.update_layout(height=250)
             st.plotly_chart(fig_rsi, use_container_width=True)
-
         with c2:
             st.subheader("MACD")
             fig_macd = go.Figure()
@@ -358,33 +320,35 @@ if file:
             fig_macd.update_layout(height=250, barmode="relative")
             st.plotly_chart(fig_macd, use_container_width=True)
 
-        # ---------- Signaux & score technique ----------
+        # =========================
+        # 🧪 Signaux & score
+        # =========================
         last = df.iloc[-1]
-        price_last = float(last["close"])
-        rsi_last = float(last["RSI"])
+        price_last   = float(last["close"])
+        rsi_last     = float(last["RSI"])
         sma_mid_last = float(last["SMA_mid"])
-        sma_slow_last = float(last["SMA_slow"])
-        macd_pos = 1 if last["MACD_hist"] > 0 else 0
-        rsi_signal = 1 if rsi_last <= 30 else (0 if rsi_last >= 70 else 0.5)
-        sma_cross = 1 if (price_last > sma_mid_last and sma_mid_last > sma_slow_last) else 0
-
-        w_rsi, w_sma, w_macd = 30, 40, 30
-        score_tech = round((rsi_signal*w_rsi + sma_cross*w_sma + macd_pos*w_macd)/(w_rsi+w_sma+w_macd)*100, 0)
+        sma_slow_last= float(last["SMA_slow"])
+        macd_pos     = 1 if float(last["MACD_hist"]) > 0 else 0
+        rsi_signal   = 1 if rsi_last <= 30 else (0 if rsi_last >= 70 else 0.5)
+        sma_cross    = 1 if (price_last > sma_mid_last and sma_mid_last > sma_slow_last) else 0
 
         df_sig = pd.DataFrame([{
             "Last Price": price_last,
             "RSI": rsi_last,
-            f"SMA{sma_mid}": sma_mid_last,
-            f"SMA{sma_slow}": sma_slow_last,
+            f"SMA{int(sma_mid)}": sma_mid_last,
+            f"SMA{int(sma_slow)}": sma_slow_last,
             "MACD>0": macd_pos,
             "RSI_signal(1/0/0.5)": rsi_signal,
             "SMA_cross(1/0)": sma_cross,
-            "Tech Score (0-100)": score_tech
         }])
-
         st.subheader("🧪 Signaux techniques (instantané)")
         st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
-        st.info("✅ Analyse technique prête. Passe à l’onglet **Recommandation & Export**.")
+
+    except Exception as e:
+        st.error(f"Erreur lors du traitement du fichier : {e}")
+        st.stop()
+
+
 
 
 

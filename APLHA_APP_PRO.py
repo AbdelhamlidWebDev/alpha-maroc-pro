@@ -96,236 +96,196 @@ with tabs[0]:
 # ==========================================================
 # 📈 Onglet TECHNIQUE
 # ==========================================================
-with tabs[1]:
-    st.markdown(
-        "Charge un **CSV Investing.com** (Données historiques). "
-        "Colonnes attendues : **Date**, **Close/Price/Dernier**, **Volume** (facultatif)."
-    )
+# ------------------------------
+# Analyse Technique : lecture CSV robuste
+# ------------------------------
+import re
 
-    # Un seul uploader (clé unique)
-    file = st.file_uploader(
-        "Uploader le CSV des prix (Investing)",
-        type=["csv"],
-        key="tech_prices_csv"
-    )
+file = st.file_uploader("Uploader le CSV des prix (Investing)", type=["csv"])
 
-    # Paramètres techniques
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        rsi_period = st.number_input("Période RSI", value=14, min_value=2, step=1)
-    with col2:
-        sma_fast = st.number_input("SMA courte", value=20, min_value=2, step=1)
-    with col3:
-        sma_mid = st.number_input("SMA moyenne", value=50, min_value=2, step=1)
-    with col4:
-        sma_slow = st.number_input("SMA longue", value=200, min_value=2, step=1)
+# Paramètres techniques (laisse-les avant le traitement)
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    rsi_period = st.number_input("Période RSI", value=14, min_value=2, step=1)
+with col2:
+    sma_fast = st.number_input("SMA courte", value=20, min_value=2, step=1)
+with col3:
+    sma_mid = st.number_input("SMA moyenne", value=50, min_value=2, step=1)
+with col4:
+    sma_slow = st.number_input("SMA longue", value=200, min_value=2, step=1)
 
-    df_sig = None
+if file:
+    try:
+        # 1) Lecture tolérante
+        file.seek(0)
+        df_raw = pd.read_csv(file, sep=None, engine="python",
+                             encoding="utf-8", skip_blank_lines=True)
+        # Si une seule colonne => mauvais encodage probable
+        if df_raw.shape[1] == 1:
+            file.seek(0)
+            df_raw = pd.read_csv(file, sep=None, engine="python",
+                                 encoding="latin1", skip_blank_lines=True)
 
-    # ------ Lecture & Nettoyage robustes ------
-    def _norm_cols(cols):
-        out = []
-        for c in cols:
-            s = str(c).lower()
-            for ch in ["\u00a0", "\ufeff", "’", "'", " "]:
+        # 2) Normalisation des entêtes FR -> canonique
+        def _clean_colname(c: str) -> str:
+            s = str(c).strip().lower()
+            for ch in ['"', "'", "\ufeff", "\u00a0"]:
                 s = s.replace(ch, "")
-            s = (s.replace("clôture", "cloture")
-                   .replace("dernier", "close")
-                   .replace("prix", "close")
-                   .replace("vol.", "volume"))
-            out.append(s)
-        return out
+            return (s.replace("clôture", "cloture")
+                     .replace("dernier", "close")
+                     .replace("prix", "close")
+                     .replace("close/price", "close")
+                     .replace("closeprice", "close")
+                     .replace("ouv.", "open")
+                     .replace("plus haut", "high")
+                     .replace("plus bas", "low")
+                     .replace("vol.", "volume")
+                     .replace("vol", "volume")
+                     .replace("variation %", "change_pct"))
 
-    def _pick(df, candidates):
-        for c in candidates:
-            if c in df.columns:
-                return c
-        return None
+        df_raw.columns = [_clean_colname(c) for c in df_raw.columns]
 
-    if file:
-        try:
-            # 1) Lecture tolérante (séparateur auto) + fallback latin1
-            # --- Normalisation simple des en-têtes ---
-            def _clean_colname(c: str) -> str:
-                s = str(c).strip().lower()
-                # enlever BOM/espaces/quotes et NBSP
-                for ch in ['"', "'", "\ufeff", "\u00a0"]:
-                    s = s.replace(ch, "")
-                # remplacer les accents & variantes fréquentes
-                s = (s.replace("clôture", "cloture")
-                       .replace("plus haut", "high")
-                       .replace("plus bas", "low")
-                       .replace("ouv.", "open")
-                       .replace("variation %", "change_pct")
-                       .replace("vol.", "volume")
-                       .replace("vol", "volume")
-                       .replace("dernier", "close")
-                       .replace("prix", "close")
-                       .replace("close/price", "close")
-                       .replace("closeprice", "close"))
-                return s
-            
-            raw.columns = [_clean_colname(c) for c in raw.columns]
-            
-            # --- On renomme vers un schéma canonique (date, close, volume, etc.) ---
-            mapping = {}
-            if "date" in raw.columns:   mapping["date"] = "date"
-            if "close" in raw.columns:  mapping["close"] = "close"   # Dernier/Prix
-            if "open" in raw.columns:   mapping["open"] = "open"
-            if "high" in raw.columns:   mapping["high"] = "high"
-            if "low" in raw.columns:    mapping["low"] = "low"
-            if "volume" in raw.columns: mapping["volume"] = "volume"
-            
-            raw = raw.rename(columns=mapping)
-            st.write("🧾 Colonnes détectées :", list(raw.columns))
-            # --- Vérif stricte des colonnes minimales attendues ---
-            if "date" not in raw.columns or "close" not in raw.columns:
-                st.error("Colonnes non reconnues. Assure-toi d’avoir **Date** et **Close/Dernier**.")
-                st.write("Colonnes détectées :", list(raw.columns))  # aide debug
-                st.stop()
-            
-            # On garde uniquement ce qui nous intéresse
-            keep_cols = ["date", "close"] + (["volume"] if "volume" in raw.columns else [])
-            df = raw[keep_cols].copy()
+        # (facultatif pour debug)
+        # st.write("Colonnes détectées :", list(df_raw.columns))
 
+        # 3) Vérif colonnes minimales
+        if "date" not in df_raw.columns or "close" not in df_raw.columns:
+            st.error("Colonnes non reconnues. Assure-toi d’avoir **Date** et **Close/Dernier**.")
+            st.stop()
 
-            rows_in = len(raw)
-            raw.columns = _norm_cols(raw.columns)
+        # 4) Sous-ensemble utile
+        keep = ["date", "close"] + (["volume"] if "volume" in df_raw.columns else [])
+        df = df_raw[keep].copy()
 
-            # 2) Colonnes (reconnaissance FR + accents)
-            date_col  = _pick(raw, ["date"])
-            price_col = _pick(raw, [
-                "close","prix","price","dernier","cloture","clôture","last","close/price","closeprice"
-            ])
-            vol_col   = _pick(raw, ["volume","vol","vol.","volume(m)","volume(k)"])
-            if not date_col or not price_col:
-                st.error("Colonnes non reconnues. Assure-toi d’avoir **Date** et **Close/Dernier**.")
-                st.stop()
+        # 5) Dates
+        df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")
 
-            keep = [date_col, price_col] + ([vol_col] if vol_col else [])
-            df = raw[keep].copy()
-            rename_map = {date_col: "date", price_col: "close"}
-            if vol_col:
-                rename_map[vol_col] = "volume"
-            df = df.rename(columns=rename_map)
+        # 6) Nettoyage prix (virgules, espaces, K/M…)
+        def parse_price(x):
+            if pd.isna(x):
+                return np.nan
+            s = str(x).replace("\u00a0", "").replace(" ", "")
+            s = s.replace("−", "-").replace("–", "-").replace(",", ".")
+            s = re.sub(r"[^0-9\.\-]", "", s)
+            try:
+                return float(s)
+            except:
+                return np.nan
 
-            # 3) Dates (Investing fr : jour/mois/année)
-            df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")
+        df["close"] = df["close"].map(parse_price)
 
-            # 4) Prix : normaliser (virgule décimale, espaces, tirets)
-            def parse_price(x):
-                if pd.isna(x): return np.nan
-                s = str(x)
-                s = (s.replace("\u00a0","").replace(" ", "")
-                       .replace("−","-").replace("–","-")
-                       .replace(",", "."))   # virgule -> point
+        if "volume" in df.columns:
+            def parse_vol(v):
+                if pd.isna(v):
+                    return np.nan
+                s = str(v).replace("\u00a0", "").replace(" ", "").lower()
+                mult = 1
+                if s.endswith("k"):
+                    mult, s = 1_000, s[:-1]
+                elif s.endswith("m"):
+                    mult, s = 1_000_000, s[:-1]
+                s = s.replace(",", ".")
                 s = re.sub(r"[^0-9\.\-]", "", s)
                 try:
-                    return float(s)
+                    return float(s) * mult
                 except:
                     return np.nan
+            df["volume"] = df["volume"].map(parse_vol)
 
-            df["close"] = df["close"].map(parse_price)
+        # 7) Trier / filtrer
+        rows_in = len(df)
+        df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+        df = df.dropna(subset=["close"]).reset_index(drop=True)
+        rows_out = len(df)
+        st.info(f"📄 Lignes CSV : **{rows_in}** → après nettoyage : **{rows_out}**")
 
-            # 5) Volume (K/M) facultatif
-            if "volume" in df.columns:
-                def parse_vol(v):
-                    if pd.isna(v): return np.nan
-                    s = str(v).replace("\u00a0","").replace(" ", "").lower()
-                    mult = 1
-                    if s.endswith("k"): mult, s = 1_000, s[:-1]
-                    elif s.endswith("m"): mult, s = 1_000_000, s[:-1]
-                    s = s.replace(",", ".")
-                    s = re.sub(r"[^0-9\.\-]", "", s)
-                    try:
-                        return float(s) * mult
-                    except:
-                        return np.nan
-                df["volume"] = df["volume"].map(parse_vol)
-
-            # 6) Trier, retirer NaN de base
-            df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
-            df = df.dropna(subset=["close"]).reset_index(drop=True)
-
-            rows_out = len(df)
-            st.info(f"📄 Lignes CSV : **{rows_in}** → après nettoyage : **{rows_out}**")
-
-            # 7) Garde-fou d’historique
-            need = max(int(sma_slow), int(rsi_period) + 5, 35)
-            if len(df) < need:
-                st.warning(
-                    f"⚠️ Historique insuffisant pour SMA {sma_slow}/RSI {rsi_period}. "
-                    f"Il reste **{len(df)}** lignes après nettoyage, besoin ≈ **{need}**. "
-                    "→ Télécharge plus de données ou diminue SMA longue."
-                )
-                st.stop()
-
-            # ---- Indicateurs
-            df["RSI"]      = rsi_calc(df["close"], period=int(rsi_period))
-            df["SMA_fast"] = sma(df["close"], int(sma_fast))
-            df["SMA_mid"]  = sma(df["close"], int(sma_mid))
-            df["SMA_slow"] = sma(df["close"], int(sma_slow))
-            macd_line, macd_sig, macd_hist = macd_calc(df["close"])
-            df["MACD"], df["MACD_signal"], df["MACD_hist"] = macd_line, macd_sig, macd_hist
-
-            # ---- Graphiques
-            st.subheader("📊 Graphique")
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=df["date"], y=df["close"], name="Close"))
-            fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_fast"], name=f"SMA{sma_fast}"))
-            fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_mid"],  name=f"SMA{sma_mid}"))
-            fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_slow"], name=f"SMA{sma_slow}"))
-            fig.update_layout(height=420, legend=dict(orientation="h", y=-0.2))
-            st.plotly_chart(fig, use_container_width=True)
-
-            c1, c2 = st.columns(2)
-            with c1:
-                st.subheader("RSI")
-                fig_rsi = go.Figure()
-                fig_rsi.add_trace(go.Scatter(x=df["date"], y=df["RSI"], name="RSI"))
-                fig_rsi.add_hline(y=70, line=dict(color="red", dash="dot"))
-                fig_rsi.add_hline(y=30, line=dict(color="green", dash="dot"))
-                fig_rsi.update_layout(height=250)
-                st.plotly_chart(fig_rsi, use_container_width=True)
-            with c2:
-                st.subheader("MACD")
-                fig_macd = go.Figure()
-                fig_macd.add_trace(go.Scatter(x=df["date"], y=df["MACD"], name="MACD"))
-                fig_macd.add_trace(go.Scatter(x=df["date"], y=df["MACD_signal"], name="Signal"))
-                fig_macd.add_trace(go.Bar(x=df["date"], y=df["MACD_hist"], name="Hist"))
-                fig_macd.update_layout(height=250, barmode="relative")
-                st.plotly_chart(fig_macd, use_container_width=True)
-
-            # ---- Signaux & score technique
-            last = df.iloc[-1]
-            price_last    = float(last["close"])
-            rsi_last      = float(last["RSI"])
-            sma_mid_last  = float(last["SMA_mid"])
-            sma_slow_last = float(last["SMA_slow"])
-            macd_pos      = 1 if float(last["MACD_hist"]) > 0 else 0
-            rsi_signal    = 1 if rsi_last <= 30 else (0 if rsi_last >= 70 else 0.5)
-            sma_cross     = 1 if (price_last > sma_mid_last and sma_mid_last > sma_slow_last) else 0
-
-            w_rsi, w_sma, w_macd = 30, 40, 30
-            score_tech = round((rsi_signal*w_rsi + sma_cross*w_sma + macd_pos*w_macd) / (w_rsi+w_sma+w_macd) * 100, 0)
-
-            df_sig = pd.DataFrame([{
-                "Last Price": price_last,
-                "RSI": rsi_last,
-                f"SMA{int(sma_mid)}": sma_mid_last,
-                f"SMA{int(sma_slow)}": sma_slow_last,
-                "MACD>0": macd_pos,
-                "RSI_signal(1/0/0.5)": rsi_signal,
-                "SMA_cross(1/0)": sma_cross,
-                "Tech Score (0-100)": score_tech
-            }])
-
-            st.subheader("🧪 Signaux techniques (instantané)")
-            st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
-
-        except Exception as e:
-            st.error(f"Erreur lors du traitement du fichier : {e}")
+        # 8) Garde-fou d’historique
+        need = max(int(sma_slow), int(rsi_period) + 5, 35)
+        if len(df) < need:
+            st.warning(
+                f"⚠️ Historique insuffisant (lignes={len(df)}, besoin≈{need}). "
+                f"Ajoute plus de données ou diminue la SMA longue."
+            )
             st.stop()
+
+        # 9) Indicateurs
+        def _sma(s, w):   return s.rolling(w, min_periods=w).mean()
+        def _ema(s, a):   return s.ewm(span=a, adjust=False, min_periods=a).mean()
+        def _rsi(s, p=14):
+            d = s.diff()
+            up = d.clip(lower=0)
+            dn = (-d).clip(lower=0)
+            ru = up.rolling(p, min_periods=p).mean()
+            rd = dn.rolling(p, min_periods=p).mean()
+            rs = ru / rd.replace(0, np.nan)
+            return 100 - (100 / (1 + rs))
+
+        macd_line   = _ema(df["close"], 12) - _ema(df["close"], 26)
+        macd_signal = _ema(macd_line, 9)
+        macd_hist   = macd_line - macd_signal
+
+        df["RSI"]      = _rsi(df["close"], int(rsi_period))
+        df["SMA_fast"] = _sma(df["close"], int(sma_fast))
+        df["SMA_mid"]  = _sma(df["close"], int(sma_mid))
+        df["SMA_slow"] = _sma(df["close"], int(sma_slow))
+        df["MACD"], df["MACD_signal"], df["MACD_hist"] = macd_line, macd_signal, macd_hist
+
+        # 10) Graphes
+        st.subheader("📊 Graphique")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df["date"], y=df["close"], name="Close"))
+        fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_fast"], name=f"SMA{sma_fast}"))
+        fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_mid"],  name=f"SMA{sma_mid}"))
+        fig.add_trace(go.Scatter(x=df["date"], y=df["SMA_slow"], name=f"SMA{sma_slow}"))
+        fig.update_layout(height=420, legend=dict(orientation="h", y=-0.2))
+        st.plotly_chart(fig, use_container_width=True)
+
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("RSI")
+            frsi = go.Figure()
+            frsi.add_trace(go.Scatter(x=df["date"], y=df["RSI"], name="RSI"))
+            frsi.add_hline(y=70, line=dict(color="red", dash="dot"))
+            frsi.add_hline(y=30, line=dict(color="green", dash="dot"))
+            frsi.update_layout(height=250)
+            st.plotly_chart(frsi, use_container_width=True)
+        with c2:
+            st.subheader("MACD")
+            fmacd = go.Figure()
+            fmacd.add_trace(go.Scatter(x=df["date"], y=df["MACD"], name="MACD"))
+            fmacd.add_trace(go.Scatter(x=df["date"], y=df["MACD_signal"], name="Signal"))
+            fmacd.add_trace(go.Bar(x=df["date"], y=df["MACD_hist"], name="Hist"))
+            fmacd.update_layout(height=250, barmode="relative")
+            st.plotly_chart(fmacd, use_container_width=True)
+
+        # 11) Signaux instantanés
+        last = df.iloc[-1]
+        price_last   = float(last["close"])
+        rsi_last     = float(last["RSI"])
+        sma_mid_last = float(last["SMA_mid"])
+        sma_slow_last= float(last["SMA_slow"])
+        macd_pos     = 1 if float(last["MACD_hist"]) > 0 else 0
+        rsi_signal   = 1 if rsi_last <= 30 else (0 if rsi_last >= 70 else 0.5)
+        sma_cross    = 1 if (price_last > sma_mid_last and sma_mid_last > sma_slow_last) else 0
+
+        df_sig = pd.DataFrame([{
+            "Last Price": price_last,
+            "RSI": rsi_last,
+            f"SMA{int(sma_mid)}": sma_mid_last,
+            f"SMA{int(sma_slow)}": sma_slow_last,
+            "MACD>0": macd_pos,
+            "RSI_signal(1/0/0.5)": rsi_signal,
+            "SMA_cross(1/0)": sma_cross,
+        }])
+        st.subheader("🧪 Signaux techniques (instantané)")
+        st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Erreur lors du traitement du fichier : {e}")
+        st.stop()
+else:
+    st.info("Charge d’abord un fichier CSV pour lancer l’analyse.")
+
 
 # ==========================================================
 # 🧠 Onglet RECOMMANDATION & EXPORT
@@ -410,6 +370,7 @@ with tabs[2]:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         st.success("Rapport prêt ✅")
+
 
 
 

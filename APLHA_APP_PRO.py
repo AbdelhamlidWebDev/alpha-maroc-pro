@@ -153,10 +153,12 @@ with tabs[1]:
             rows_in = len(raw)
             raw.columns = _norm_cols(raw.columns)
 
-            # 2) Colonnes
+            # 2) Colonnes (reconnaissance FR + accents)
             date_col  = _pick(raw, ["date"])
-            price_col = _pick(raw, ["close","cloture","dernier","last","close/price","closeprice"])
-            vol_col   = _pick(raw, ["volume","vol"])
+            price_col = _pick(raw, [
+                "close","prix","price","dernier","cloture","clôture","last","close/price","closeprice"
+            ])
+            vol_col   = _pick(raw, ["volume","vol","vol.","volume(m)","volume(k)"])
             if not date_col or not price_col:
                 st.error("Colonnes non reconnues. Assure-toi d’avoir **Date** et **Close/Dernier**.")
                 st.stop()
@@ -369,3 +371,4 @@ with tabs[2]:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         st.success("Rapport prêt ✅")
+

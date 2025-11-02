@@ -66,21 +66,34 @@ with tabs[1]:
                 df_raw = pd.read_csv(file, sep=None, engine="python", encoding="latin1", skip_blank_lines=True)
 
             # --- Nettoyage des noms de colonnes ---
-            def _clean_colname(c: str) -> str:
-                s = str(c).strip().lower()
-                for ch in ['"', "'", "\ufeff", "\u00a0", "\u202f"]:
-                    s = s.replace(ch, "")
-                return (s.replace("clôture", "cloture")
-                         .replace("close/dernier", "close")
-                         .replace("close/price", "close")
-                         .replace("closeprice", "close")
-                         .replace("dernier", "close")
-                         .replace("prix", "close")
-                         .replace("vol.", "volume")
-                         .replace("vol", "volume")
-                         .replace("date", "date"))
+        # --- Nettoyage des noms de colonnes ---
+def _clean_colname(c: str) -> str:
+    s = str(c).strip().lower()
+    for ch in ['"', "'", "\ufeff", "\u00a0", "\u202f"]:
+        s = s.replace(ch, "")
 
-            df_raw.columns = [_clean_colname(c) for c in df_raw.columns]
+    # normalisation principale
+    s = (s.replace("clôture", "cloture")
+           .replace("close/price", "close")
+           .replace("closeprice", "close")
+           .replace("close/dernier", "close")
+           .replace("dernier", "close")
+           .replace("prix", "close")
+           .replace("ouv.", "open")
+           .replace("plus haut", "high")
+           .replace("plus bas", "low")
+           .replace("variation %", "change_pct"))
+
+    # correction spécifique pour éviter "volumeume"
+    if s.startswith("vol"):
+        s = "volume"
+
+    if s.startswith("date"):
+        s = "date"
+
+    return s
+
+
             st.caption(f"Colonnes détectées : {list(df_raw.columns)}")
 
             if "date" not in df_raw.columns or "close" not in df_raw.columns:
@@ -90,7 +103,17 @@ with tabs[1]:
             # --- Sélection utile ---
             keep = ["date", "close"] + (["volume"] if "volume" in df_raw.columns else [])
             df = df_raw[keep].copy()
+            # Nettoyage des dates avant parsing
+            df["date"] = (
+                df["date"].astype(str)
+                  .str.replace('"', '', regex=False)
+                  .str.replace("'", '', regex=False)
+                  .str.replace("\u00a0", "", regex=False)
+                  .str.replace("\u202f", "", regex=False)
+                  .str.strip()
+            )
             df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")
+
 
             # --- Nettoyage des valeurs ---
             def parse_price(x):
@@ -328,6 +351,7 @@ with tabs[2]:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         st.success("Rapport prêt ✅")
+
 
 
 

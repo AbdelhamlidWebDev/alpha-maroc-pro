@@ -66,32 +66,32 @@ with tabs[1]:
                 df_raw = pd.read_csv(file, sep=None, engine="python", encoding="latin1", skip_blank_lines=True)
 
             # --- Nettoyage des noms de colonnes ---
-        # --- Nettoyage des noms de colonnes ---
-    def _clean_colname(c: str) -> str:
-    s = str(c).strip().lower()
-    for ch in ['"', "'", "\ufeff", "\u00a0", "\u202f"]:
-        s = s.replace(ch, "")
-
-    # normalisation principale
-    s = (s.replace("clôture", "cloture")
-           .replace("close/price", "close")
-           .replace("closeprice", "close")
-           .replace("close/dernier", "close")
-           .replace("dernier", "close")
-           .replace("prix", "close")
-           .replace("ouv.", "open")
-           .replace("plus haut", "high")
-           .replace("plus bas", "low")
-           .replace("variation %", "change_pct"))
-
-    # correction spécifique pour éviter "volumeume"
-    if s.startswith("vol"):
-        s = "volume"
-
-    if s.startswith("date"):
-        s = "date"
-
-    return s
+            # --- Nettoyage des noms de colonnes ---
+            def _clean_colname(c):
+                s = str(c).strip().lower()
+                for ch in ['"', "'", "\ufeff", "\u00a0", "\u202f"]:
+                    s = s.replace(ch, "")
+            
+                # normalisation principale
+                s = (s.replace("clôture", "cloture")
+                       .replace("close/price", "close")
+                       .replace("closeprice", "close")
+                       .replace("close/dernier", "close")
+                       .replace("dernier", "close")
+                       .replace("prix", "close")
+                       .replace("ouv.", "open")
+                       .replace("plus haut", "high")
+                       .replace("plus bas", "low")
+                       .replace("variation %", "change_pct"))
+            
+                # correction spécifique pour éviter "volumeume"
+                if s.startswith("vol"):
+                    s = "volume"
+            
+                if s.startswith("date"):
+                    s = "date"
+            
+                return s
 
 
             st.caption(f"Colonnes détectées : {list(df_raw.columns)}")
@@ -351,6 +351,7 @@ with tabs[2]:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         st.success("Rapport prêt ✅")
+
 
 
 

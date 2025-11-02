@@ -145,10 +145,49 @@ with tabs[1]:
     if file:
         try:
             # 1) Lecture tolérante (séparateur auto) + fallback latin1
-            raw = pd.read_csv(file, sep=None, engine="python", encoding="utf-8", skip_blank_lines=True)
-            if raw.shape[1] == 1:
-                file.seek(0)
-                raw = pd.read_csv(file, sep=None, engine="python", encoding="latin1", skip_blank_lines=True)
+            # --- Normalisation simple des en-têtes ---
+            def _clean_colname(c: str) -> str:
+                s = str(c).strip().lower()
+                # enlever BOM/espaces/quotes et NBSP
+                for ch in ['"', "'", "\ufeff", "\u00a0"]:
+                    s = s.replace(ch, "")
+                # remplacer les accents & variantes fréquentes
+                s = (s.replace("clôture", "cloture")
+                       .replace("plus haut", "high")
+                       .replace("plus bas", "low")
+                       .replace("ouv.", "open")
+                       .replace("variation %", "change_pct")
+                       .replace("vol.", "volume")
+                       .replace("vol", "volume")
+                       .replace("dernier", "close")
+                       .replace("prix", "close")
+                       .replace("close/price", "close")
+                       .replace("closeprice", "close"))
+                return s
+            
+            raw.columns = [_clean_colname(c) for c in raw.columns]
+            
+            # --- On renomme vers un schéma canonique (date, close, volume, etc.) ---
+            mapping = {}
+            if "date" in raw.columns:   mapping["date"] = "date"
+            if "close" in raw.columns:  mapping["close"] = "close"   # Dernier/Prix
+            if "open" in raw.columns:   mapping["open"] = "open"
+            if "high" in raw.columns:   mapping["high"] = "high"
+            if "low" in raw.columns:    mapping["low"] = "low"
+            if "volume" in raw.columns: mapping["volume"] = "volume"
+            
+            raw = raw.rename(columns=mapping)
+            
+            # --- Vérif stricte des colonnes minimales attendues ---
+            if "date" not in raw.columns or "close" not in raw.columns:
+                st.error("Colonnes non reconnues. Assure-toi d’avoir **Date** et **Close/Dernier**.")
+                st.write("Colonnes détectées :", list(raw.columns))  # aide debug
+                st.stop()
+            
+            # On garde uniquement ce qui nous intéresse
+            keep_cols = ["date", "close"] + (["volume"] if "volume" in raw.columns else [])
+            df = raw[keep_cols].copy()
+
 
             rows_in = len(raw)
             raw.columns = _norm_cols(raw.columns)
@@ -371,4 +410,5 @@ with tabs[2]:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         st.success("Rapport prêt ✅")
+
 

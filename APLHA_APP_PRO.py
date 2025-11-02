@@ -56,9 +56,7 @@ with tabs[1]:
     with col4:
         sma_slow = st.number_input("SMA longue", value=200, min_value=2, step=1)
 
-    if file:
-        try:
-        # 1) Lecture robuste : forcer d'abord le séparateur ';' (Investing FR), sinon ',' en fallback
+
     if file:
         try:
             # 1) Lecture robuste : forcer d'abord le séparateur ';' (Investing FR), sinon ',' en fallback
@@ -411,6 +409,7 @@ with tabs[2]:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         st.success("Rapport prêt ✅")
+
 
 
 

@@ -1,6 +1,7 @@
-# ALPH_APP.py  — Alpha Maroc Pro (Fondamental + Technique + Export + Reco)
+# ALPH_APP_PRO.py — Alpha Maroc Pro (Fondamental + Technique + Export + Reco)
+
 import io
-import re  # <- déplacé ici
+import re
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -8,36 +9,35 @@ import streamlit as st
 
 st.set_page_config(page_title="Alpha Maroc – Analyseur Pro", layout="wide")
 
-# ===========================
-# Helpers (indicateurs tech)
-# ===========================
+# ------------------------
+# Indicateurs techniques
+# ------------------------
 def sma(series, window):
-    return series.rolling(window).mean()
+    return series.rolling(window, min_periods=window).mean()
 
 def ema(series, span):
-    return series.ewm(span=span, adjust=False).mean()
+    return series.ewm(span=span, adjust=False, min_periods=span).mean()
 
-def rsi(series, period=14):
+def rsi_calc(series, period=14):
     delta = series.diff()
-    up = np.where(delta > 0, delta, 0.0)
-    down = np.where(delta < 0, -delta, 0.0)
-    roll_up = pd.Series(up, index=series.index).rolling(period).mean()
-    roll_down = pd.Series(down, index=series.index).rolling(period).mean()
+    up   = delta.clip(lower=0)
+    down = -delta.clip(upper=0)
+    roll_up   = up.rolling(period, min_periods=period).mean()
+    roll_down = down.rolling(period, min_periods=period).mean()
     rs = roll_up / roll_down.replace(0, np.nan)
-    rsi_v = 100 - (100 / (1 + rs))
-    return rsi_v.bfill()
+    r = 100 - (100 / (1 + rs))
+    return r.bfill()
 
-def macd(series, fast=12, slow=26, signal=9):
-    macd_line = ema(series, fast) - ema(series, slow)
+def macd_calc(series, fast=12, slow=26, signal=9):
+    macd_line   = ema(series, fast) - ema(series, slow)
     signal_line = ema(macd_line, signal)
     hist = macd_line - signal_line
     return macd_line, signal_line, hist
 
-# ===========================
-# Titre
-# ===========================
+# ------------------------
+# Titre & onglets
+# ------------------------
 st.title("📊 Alpha Maroc – Analyseur Pro (Fondamental + Technique)")
-
 tabs = st.tabs(["🏦 Analyse Fondamentale", "📈 Analyse Technique", "🧠 Recommandation & Export"])
 
 # ==========================================================
@@ -57,12 +57,12 @@ with tabs[0]:
         total_debt = st.number_input("Dette totale (DH)", value=50_000_000, step=100_000)
         cash = st.number_input("Trésorerie (DH)", value=20_000_000, step=100_000)
 
-    # Calculs
+    # Calculs fondamentaux
     market_cap = price * shares_outstanding
     eps = net_income / shares_outstanding if shares_outstanding else np.nan
-    per = price / eps if eps and eps > 0 else np.nan
+    per = price / eps if (eps and eps > 0) else np.nan
     bvps = total_equity / shares_outstanding if shares_outstanding else np.nan
-    pb = price / bvps if bvps and bvps > 0 else np.nan
+    pb = price / bvps if (bvps and bvps > 0) else np.nan
     roe = (net_income / total_equity) * 100 if total_equity else np.nan
     roa = (net_income / total_assets) * 100 if total_assets else np.nan
     ev = market_cap + total_debt - cash
@@ -94,7 +94,7 @@ with tabs[0]:
     st.success("✅ Calcul fondamental terminé. Passe à l’onglet **Analyse Technique** pour charger l’historique de prix.")
 
 # ==========================================================
-# 📈 Onglet TECHNIQUE — robuste & structuré
+# 📈 Onglet TECHNIQUE
 # ==========================================================
 with tabs[1]:
     st.markdown(
@@ -102,14 +102,14 @@ with tabs[1]:
         "Colonnes attendues : **Date**, **Close/Price/Dernier**, **Volume** (facultatif)."
     )
 
-    # ---------- 1. Uploader (unique) ----------
+    # Un seul uploader (clé unique)
     file = st.file_uploader(
         "Uploader le CSV des prix (Investing)",
         type=["csv"],
-        key="tech_prices_csv"  # <- clé unique pour éviter les doublons
+        key="tech_prices_csv"
     )
 
-    # ---------- 2. Paramètres techniques (une seule fois) ----------
+    # Paramètres techniques
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         rsi_period = st.number_input("Période RSI", value=14, min_value=2, step=1)
@@ -120,49 +120,19 @@ with tabs[1]:
     with col4:
         sma_slow = st.number_input("SMA longue", value=200, min_value=2, step=1)
 
-    # ---------- 3. Helpers robustes ----------
-    def normalize_numeric(series: pd.Series) -> pd.Series:
-        s = (series.astype(str)
-                  .str.replace("\u00a0", "", regex=False)  # NBSP
-                  .str.replace("\u202f", "", regex=False)  # fine NBSP
-                  .str.replace(" ", "", regex=False)       # espaces
-                  .str.replace(".", "", regex=False)       # milliers
-                  .str.replace(",", ".", regex=False))     # décimal FR -> .
-        return pd.to_numeric(s, errors="coerce")
+    df_sig = None
 
-    def find_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
-        lower_map = {c.lower(): c for c in df.columns}
-        for cand in candidates:
-            key = cand.lower()
-            if key in lower_map:
-                return lower_map[key]
-            for k, orig in lower_map.items():
-                if k.startswith(key):
-                    return orig
-        return None
-
-    def safe_rsi(close: pd.Series, period: int = 14) -> pd.Series:
-        close = close.astype(float)
-        delta = close.diff()
-        up = delta.clip(lower=0.0)
-        down = (-delta).clip(lower=0.0)
-        roll_up = up.rolling(period, min_periods=period).mean()
-        roll_down = down.rolling(period, min_periods=period).mean()
-        rs = roll_up / roll_down.replace(0, np.nan)
-        out = 100 - (100 / (1 + rs))
-        return out.bfill()
-
-    # =======================
-    # 🔧 Lecture & nettoyage
-    # =======================
+    # ------ Lecture & Nettoyage robustes ------
     def _norm_cols(cols):
         out = []
         for c in cols:
             s = str(c).lower()
             for ch in ["\u00a0", "\ufeff", "’", "'", " "]:
                 s = s.replace(ch, "")
-            s = s.replace("clôture", "cloture").replace("dernier", "close").replace("prix", "close")
-            s = s.replace("date", "date").replace("vol.", "volume").replace("vol", "volume")
+            s = (s.replace("clôture", "cloture")
+                   .replace("dernier", "close")
+                   .replace("prix", "close")
+                   .replace("vol.", "volume"))
             out.append(s)
         return out
 
@@ -174,7 +144,7 @@ with tabs[1]:
 
     if file:
         try:
-            # 1) Lecture tolérante
+            # 1) Lecture tolérante (séparateur auto) + fallback latin1
             raw = pd.read_csv(file, sep=None, engine="python", encoding="utf-8", skip_blank_lines=True)
             if raw.shape[1] == 1:
                 file.seek(0)
@@ -183,32 +153,31 @@ with tabs[1]:
             rows_in = len(raw)
             raw.columns = _norm_cols(raw.columns)
 
-            # 2) Détection colonnes
+            # 2) Colonnes
             date_col  = _pick(raw, ["date"])
-            price_col = _pick(raw, ["close", "cloture", "dernier", "last", "close/price", "closeprice"])
-            vol_col   = _pick(raw, ["volume", "vol"])
-
+            price_col = _pick(raw, ["close","cloture","dernier","last","close/price","closeprice"])
+            vol_col   = _pick(raw, ["volume","vol"])
             if not date_col or not price_col:
                 st.error("Colonnes non reconnues. Assure-toi d’avoir **Date** et **Close/Dernier**.")
                 st.stop()
 
-            df = raw[[date_col, price_col] + ([vol_col] if vol_col else [])].copy()
-            renames = {date_col: "date", price_col: "close"}
+            keep = [date_col, price_col] + ([vol_col] if vol_col else [])
+            df = raw[keep].copy()
+            rename_map = {date_col: "date", price_col: "close"}
             if vol_col:
-                renames[vol_col] = "volume"
-            df.rename(columns=renames, inplace=True)
+                rename_map[vol_col] = "volume"
+            df = df.rename(columns=rename_map)
 
             # 3) Dates (Investing fr : jour/mois/année)
             df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce")
 
-            # 4) Prix : normaliser
+            # 4) Prix : normaliser (virgule décimale, espaces, tirets)
             def parse_price(x):
-                if pd.isna(x):
-                    return np.nan
+                if pd.isna(x): return np.nan
                 s = str(x)
-                s = (s.replace("\u00a0", "").replace(" ", "")
-                       .replace("−", "-").replace("–", "-")
-                       .replace(",", "."))
+                s = (s.replace("\u00a0","").replace(" ", "")
+                       .replace("−","-").replace("–","-")
+                       .replace(",", "."))   # virgule -> point
                 s = re.sub(r"[^0-9\.\-]", "", s)
                 try:
                     return float(s)
@@ -220,14 +189,11 @@ with tabs[1]:
             # 5) Volume (K/M) facultatif
             if "volume" in df.columns:
                 def parse_vol(v):
-                    if pd.isna(v):
-                        return np.nan
-                    s = str(v).replace("\u00a0", "").replace(" ", "").lower()
+                    if pd.isna(v): return np.nan
+                    s = str(v).replace("\u00a0","").replace(" ", "").lower()
                     mult = 1
-                    if s.endswith("k"):
-                        mult, s = 1_000, s[:-1]
-                    elif s.endswith("m"):
-                        mult, s = 1_000_000, s[:-1]
+                    if s.endswith("k"): mult, s = 1_000, s[:-1]
+                    elif s.endswith("m"): mult, s = 1_000_000, s[:-1]
                     s = s.replace(",", ".")
                     s = re.sub(r"[^0-9\.\-]", "", s)
                     try:
@@ -253,40 +219,15 @@ with tabs[1]:
                 )
                 st.stop()
 
-            # =========================
-            # 🧮 Indicateurs techniques
-            # =========================
-            def _sma(series, window):
-                return series.rolling(window, min_periods=window).mean()
-
-            def _ema(series, span):
-                return series.ewm(span=span, adjust=False, min_periods=span).mean()
-
-            def _rsi(series, period=14):
-                delta = series.diff()
-                up = delta.clip(lower=0)
-                down = -delta.clip(upper=0)
-                roll_up = up.rolling(period, min_periods=period).mean()
-                roll_down = down.rolling(period, min_periods=period).mean()
-                rs = roll_up / roll_down.replace(0, np.nan)
-                return 100 - (100 / (1 + rs))
-
-            def _macd(series, fast=12, slow=26, signal=9):
-                macd_line = _ema(series, fast) - _ema(series, slow)
-                signal_line = _ema(macd_line, signal)
-                hist = macd_line - signal_line
-                return macd_line, signal_line, hist
-
-            df["RSI"]      = _rsi(df["close"], period=int(rsi_period))
-            df["SMA_fast"] = _sma(df["close"], int(sma_fast))
-            df["SMA_mid"]  = _sma(df["close"], int(sma_mid))
-            df["SMA_slow"] = _sma(df["close"], int(sma_slow))
-            macd_line, macd_sig, macd_hist = _macd(df["close"])
+            # ---- Indicateurs
+            df["RSI"]      = rsi_calc(df["close"], period=int(rsi_period))
+            df["SMA_fast"] = sma(df["close"], int(sma_fast))
+            df["SMA_mid"]  = sma(df["close"], int(sma_mid))
+            df["SMA_slow"] = sma(df["close"], int(sma_slow))
+            macd_line, macd_sig, macd_hist = macd_calc(df["close"])
             df["MACD"], df["MACD_signal"], df["MACD_hist"] = macd_line, macd_sig, macd_hist
 
-            # =========================
-            # 📊 Graphiques
-            # =========================
+            # ---- Graphiques
             st.subheader("📊 Graphique")
             fig = go.Figure()
             fig.add_trace(go.Scatter(x=df["date"], y=df["close"], name="Close"))
@@ -314,9 +255,7 @@ with tabs[1]:
                 fig_macd.update_layout(height=250, barmode="relative")
                 st.plotly_chart(fig_macd, use_container_width=True)
 
-            # =========================
-            # 🧪 Signaux & score
-            # =========================
+            # ---- Signaux & score technique
             last = df.iloc[-1]
             price_last    = float(last["close"])
             rsi_last      = float(last["RSI"])
@@ -326,6 +265,9 @@ with tabs[1]:
             rsi_signal    = 1 if rsi_last <= 30 else (0 if rsi_last >= 70 else 0.5)
             sma_cross     = 1 if (price_last > sma_mid_last and sma_mid_last > sma_slow_last) else 0
 
+            w_rsi, w_sma, w_macd = 30, 40, 30
+            score_tech = round((rsi_signal*w_rsi + sma_cross*w_sma + macd_pos*w_macd) / (w_rsi+w_sma+w_macd) * 100, 0)
+
             df_sig = pd.DataFrame([{
                 "Last Price": price_last,
                 "RSI": rsi_last,
@@ -334,10 +276,96 @@ with tabs[1]:
                 "MACD>0": macd_pos,
                 "RSI_signal(1/0/0.5)": rsi_signal,
                 "SMA_cross(1/0)": sma_cross,
+                "Tech Score (0-100)": score_tech
             }])
+
             st.subheader("🧪 Signaux techniques (instantané)")
             st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
 
         except Exception as e:
             st.error(f"Erreur lors du traitement du fichier : {e}")
             st.stop()
+
+# ==========================================================
+# 🧠 Onglet RECOMMANDATION & EXPORT
+# ==========================================================
+with tabs[2]:
+    st.markdown("Synthèse des signaux **Fondamentaux + Techniques** et **export Excel**.")
+
+    # Recrée df_fonda localement si l'utilisateur n'a pas visité le premier onglet
+    df_fonda_safe = pd.DataFrame({
+        "Market Cap (DH)": [market_cap],
+        "EPS (DH)": [eps],
+        "PER": [per],
+        "BVPS": [bvps],
+        "P/B": [pb],
+        "ROE %": [roe],
+        "ROA %": [roa],
+        "EV/EBITDA": [ev_ebitda],
+        "Net Margin %": [net_margin]
+    })
+
+    st.subheader("📌 Résumé fondamental")
+    st.dataframe(df_fonda_safe.style.format("{:,.2f}"), use_container_width=True)
+
+    st.subheader("📌 Résumé technique")
+    if 'df_sig' in locals() and df_sig is not None:
+        st.dataframe(df_sig.style.format("{:,.2f}"), use_container_width=True)
+        tech_score = float(df_sig["Tech Score (0-100)"].iloc[0])
+    else:
+        st.warning("Charge d’abord un CSV dans **Analyse Technique**.")
+        tech_score = np.nan
+
+    # Score fondamental simple (0..50)
+    score_fonda = 0
+    if per and per > 0: score_fonda += 20 if 10 <= per <= 25 else (10 if per < 10 else 0)
+    if roe and roe > 0: score_fonda += 25 if roe > 15 else (15 if roe >= 8 else 0)
+    if net_margin and net_margin > 10: score_fonda += 15
+    if pb and pb > 3: score_fonda -= 10
+    score_fonda = max(0, min(50, score_fonda))
+
+    # Score global
+    global_score = None
+    if not np.isnan(tech_score):
+        global_score = round(score_fonda + (tech_score / 2), 0)  # /100
+
+    st.subheader("🧠 Recommandation automatique")
+    if global_score is not None:
+        if global_score >= 70:
+            verdict = "✅ **Acheter / Renforcer**"
+        elif global_score >= 50:
+            verdict = "🟡 **Conserver / Surveiller**"
+        else:
+            verdict = "🔻 **Alléger / Éviter**"
+        st.metric("Score global (0–100)", f"{global_score:.0f}", help="50% Fondamental + 50% Technique")
+        st.success(f"Verdict : {verdict}")
+    else:
+        st.info("Charge les données techniques pour calculer le score global.")
+
+    # -------- Export Excel (fondamental + technique + historique optionnel)
+    st.subheader("📤 Export Excel")
+    include_hist = False
+    if 'tech_prices_csv' in st.session_state and st.session_state["tech_prices_csv"] is not None:
+        include_hist = st.checkbox("Inclure l'historique de prix dans l'Excel", value=True)
+
+    if st.button("📥 Télécharger le rapport Excel"):
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df_fonda_safe.to_excel(writer, sheet_name="Fondamental", index=False)
+            if 'df_sig' in locals() and df_sig is not None:
+                df_sig.to_excel(writer, sheet_name="Technique_Signaux", index=False)
+            if include_hist and 'tech_prices_csv' in st.session_state:
+                f = st.session_state["tech_prices_csv"]
+                try:
+                    f.seek(0)
+                    pd.read_csv(f, sep=None, engine="python").to_excel(writer, sheet_name="Prix_Historique", index=False)
+                except Exception:
+                    pass
+
+        st.download_button(
+            label="⬇️ Télécharger AlphaMaroc_Report.xlsx",
+            data=output.getvalue(),
+            file_name="AlphaMaroc_Report.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        st.success("Rapport prêt ✅")

@@ -177,7 +177,7 @@ with tabs[1]:
             if "volume" in raw.columns: mapping["volume"] = "volume"
             
             raw = raw.rename(columns=mapping)
-            
+            st.write("🧾 Colonnes détectées :", list(raw.columns))
             # --- Vérif stricte des colonnes minimales attendues ---
             if "date" not in raw.columns or "close" not in raw.columns:
                 st.error("Colonnes non reconnues. Assure-toi d’avoir **Date** et **Close/Dernier**.")
@@ -410,5 +410,6 @@ with tabs[2]:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         st.success("Rapport prêt ✅")
+
 
 

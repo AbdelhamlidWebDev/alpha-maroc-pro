@@ -59,26 +59,61 @@ with tabs[1]:
     if file:
         try:
         # 1) Lecture robuste : forcer d'abord le séparateur ';' (Investing FR), sinon ',' en fallback
-        file.seek(0)
+    if file:
         try:
-            df_raw = pd.read_csv(
-                file,
-                sep=';',                    # Investing FR utilise ';'
-                engine='python',
-                encoding='utf-8-sig',       # enlève le BOM (\ufeff)
-                quotechar='"',
-                skipinitialspace=True
-            )
-        except Exception:
+            # 1) Lecture robuste : forcer d'abord le séparateur ';' (Investing FR), sinon ',' en fallback
             file.seek(0)
-            df_raw = pd.read_csv(
-                file,
-                sep=',',                    # fallback si ce n'était pas ';'
-                engine='python',
-                encoding='utf-8-sig',
-                quotechar='"',
-                skipinitialspace=True
-            )
+            try:
+                df_raw = pd.read_csv(
+                    file,
+                    sep=';',                    # Investing FR utilise ';'
+                    engine='python',
+                    encoding='utf-8-sig',       # enlève le BOM (\ufeff)
+                    quotechar='"',
+                    skipinitialspace=True
+                )
+            except Exception:
+                file.seek(0)
+                df_raw = pd.read_csv(
+                    file,
+                    sep=',',                    # fallback si ce n'était pas ';'
+                    engine='python',
+                    encoding='utf-8-sig',
+                    quotechar='"',
+                    skipinitialspace=True
+                )
+    
+            # 2) Normaliser les entêtes
+            df_raw.columns = [_clean_colname(c) for c in df_raw.columns]
+            st.caption(f"Colonnes détectées (après nettoyage) : {list(df_raw.columns)}")
+    
+            # 3) Vérif colonnes minimales
+            if "date" not in df_raw.columns or "close" not in df_raw.columns:
+                st.error("Colonnes non reconnues. Assure-toi d’avoir **Date** et **Close/Dernier**.")
+                st.stop()
+    
+            # (le reste de ton code continue ici — nettoyage, RSI, MACD, etc.)
+    
+        except Exception as e:
+            st.error(f"Erreur lors du traitement du fichier : {e}")
+            st.stop()
+
+
+        # 2) Normaliser les entêtes
+        df_raw.columns = [_clean_colname(c) for c in df_raw.columns]
+        st.caption(f"Colonnes détectées (après nettoyage) : {list(df_raw.columns)}")
+
+        # 3) Vérif colonnes minimales
+        if "date" not in df_raw.columns or "close" not in df_raw.columns:
+            st.error("Colonnes non reconnues. Assure-toi d’avoir **Date** et **Close/Dernier**.")
+            st.stop()
+
+        # (le reste de ton code continue ici — nettoyage, RSI, MACD, etc.)
+
+    except Exception as e:
+        st.error(f"Erreur lors du traitement du fichier : {e}")
+        st.stop()
+
 
         # 2) Normaliser les entêtes
         df_raw.columns = [_clean_colname(c) for c in df_raw.columns]
@@ -376,6 +411,7 @@ with tabs[2]:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         st.success("Rapport prêt ✅")
+
 
 
 

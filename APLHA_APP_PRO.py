@@ -67,7 +67,7 @@ with tabs[1]:
 
             # --- Nettoyage des noms de colonnes ---
         # --- Nettoyage des noms de colonnes ---
-def _clean_colname(c: str) -> str:
+    def _clean_colname(c: str) -> str:
     s = str(c).strip().lower()
     for ch in ['"', "'", "\ufeff", "\u00a0", "\u202f"]:
         s = s.replace(ch, "")
@@ -351,6 +351,7 @@ with tabs[2]:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         st.success("Rapport prêt ✅")
+
 
 
 

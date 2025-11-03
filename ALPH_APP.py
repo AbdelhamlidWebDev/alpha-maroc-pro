@@ -53,13 +53,13 @@ st.title("📊 Analyseur Fondamental – Alpha Maroc")
 
 with st.sidebar:
     st.header("Paramètres de l'entreprise")
-    price = st.number_input("Prix actuel (DH)", value=126.50, min_value=0.0, step=0.01)
-    shares = st.number_input("Actions en circulation", value=17695000, min_value=0, step=1000)
-    revenue = st.number_input("Chiffre d'affaires (DH)", value=373400000.0, min_value=0.0, step=1000.0)
-    net_income = st.number_input("Résultat net (DH)", value=44642000.0, min_value=0.0, step=1000.0)
-    total_assets = st.number_input("Total actif (DH)", value=468000000.0, min_value=0.0, step=1000.0)
-    equity = st.number_input("Capitaux propres (DH)", value=300000000.0, min_value=0.0, step=1000.0)
-    ebitda = st.number_input("EBITDA (DH)", value=70000000.0, min_value=0.0, step=1000.0)
+    price = st.number_input("Prix actuel (DH)", value=00.00, min_value=0.0, step=0.01)
+    shares = st.number_input("Actions en circulation", value=00, min_value=0, step=1000)
+    revenue = st.number_input("Chiffre d'affaires (DH)", value=00.0, min_value=0.0, step=1000.0)
+    net_income = st.number_input("Résultat net (DH)", value=00.0, min_value=0.0, step=1000.0)
+    total_assets = st.number_input("Total actif (DH)", value=00.0, min_value=0.0, step=1000.0)
+    equity = st.number_input("Capitaux propres (DH)", value=00.0, min_value=0.0, step=1000.0)
+    ebitda = st.number_input("EBITDA (DH)", value=00.0, min_value=0.0, step=1000.0)
 
 market_cap = price * shares
 eps = (net_income / shares) if shares else np.nan

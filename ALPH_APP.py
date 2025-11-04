@@ -53,7 +53,7 @@ st.title("📊 Analyseur Fondamental – Alpha Maroc")
 with st.sidebar:
     st.header("Paramètres de l'entreprise")
     price = st.number_input("Prix actuel (DH)", value=00.00, min_value=0.0, step=0.01)
-    shares = st.number_input("Actions en circulation", value=00, min_value=0, step=1000)
+    shares = st.number_input("Actions en circulation", value=176.951.500:00, min_value=0, step=1000)
     revenue = st.number_input("Chiffre d'affaires (DH)", value=00.0, min_value=0.0, step=1000.0)
     net_income = st.number_input("Résultat net (DH)", value=00.0, min_value=0.0, step=1000.0)
     total_assets = st.number_input("Total actif (DH)", value=00.0, min_value=0.0, step=1000.0)

@@ -114,5 +114,79 @@ gain_net = vente["net"] - achat["net"]
 st.success(f"Gain net estimé : {gain_net:,.2f} DH".replace(",", " "))
 st.caption("Frais par défaut : 0,60% courtage + 0,20% R/L + 0,10% Bourse (min 10 DH) + TVA 10%. Ajustez dans le code selon votre courtier.")
 
+def compute_metrics(row):
+    m = {}
+
+    # --- bases sûres ---
+    CA = max(1.0, float(row.get("chiffre_affaires", 0)))
+    EBIT = float(row.get("resultat_exploitation", 0))
+    RN = float(row.get("resultat_net", 0))
+    CP = float(row.get("capitaux_propres", 0))
+    AT = max(1.0, float(row.get("actif_total", 0)))
+    DF = float(row.get("dettes_financement", 0))
+    CF = float(row.get("charges_financieres", 0))
+    PF = float(row.get("produits_financiers", 0))
+
+    stocks = float(row.get("stocks_net", 0))
+    clients = float(row.get("clients", 0))
+    autres_creances = float(row.get("autres_creances", 0))
+    treso_actif = float(row.get("tresorerie_actif", 0))
+    treso_passif = float(row.get("tresorerie_passif", 0))
+    fournisseurs = float(row.get("fournisseurs", 0))
+    autres_dettes_ct = float(row.get("autres_dettes_ct", 0))
+    immobs = float(row.get("immobilisations_net", 0))
+
+    # --- profitabilité ---
+    m["marge_nette"] = RN / CA
+    m["marge_ebit"] = EBIT / CA
+    m["roe"] = (RN / CP) if CP > 0 else np.nan
+    m["roa"] = RN / AT
+
+    # --- structure ---
+    dette_nette = DF + treso_passif - treso_actif
+    m["dette_nette"] = dette_nette
+    m["gearing"] = (dette_nette / CP) if CP > 0 else np.nan
+    m["couverture_interets"] = EBIT / max(1.0, CF)
+
+    actif_circ = stocks + clients + autres_creances + treso_actif
+    passif_circ = fournisseurs + autres_dettes_ct + treso_passif
+    m["current_ratio"] = actif_circ / max(1.0, passif_circ)
+    m["quick_ratio"] = (actif_circ - stocks) / max(1.0, passif_circ)
+    m["wcr"] = (stocks + clients + autres_creances) - (fournisseurs + autres_dettes_ct)
+    m["frng"] = (CP + DF) - immobs
+
+    # --- efficacité (si achats fournis) ---
+    achats = float(row.get("achats_revendus", 0)) or float(row.get("achats_revendus_marchandises", 0))
+    cout_ventes = max(1.0, achats)
+    m["dso"] = clients / CA * 365
+    m["dio"] = stocks / cout_ventes * 365
+    m["dpo"] = fournisseurs / cout_ventes * 365
+    m["ccc"] = m["dso"] + m["dio"] - m["dpo"]
+
+    # --- score simple ---
+    score = 0; total = 0
+
+    def add(points, cond):
+        nonlocal score, total
+        total += points
+        if cond: score += points
+
+    add(10, m["marge_nette"] > 0.05)
+    add(10, m["marge_ebit"] > 0.07)
+    add(10, (not np.isnan(m["roe"])) and m["roe"] > 0.12)
+    add(10, m["current_ratio"] >= 1.2)
+    add(10, m["quick_ratio"] >= 1.0)
+    add(10, (not np.isnan(m["gearing"])) and m["gearing"] <= 1.0)
+    add(10, m["couverture_interets"] >= 2.0)
+    add(10, m["ccc"] <= 120)  # délai de conversion du cash raisonnable
+
+    m["score"] = round(100 * score / max(1, total), 1)
+    m["red_flags"] = []
+    if CP <= 0: m["red_flags"].append("Capitaux propres négatifs")
+    if m["couverture_interets"] < 1: m["red_flags"].append("Couverture intérêts < 1")
+    if m["current_ratio"] < 1: m["red_flags"].append("Liquidité court terme < 1")
+
+    return m
+
 
 
